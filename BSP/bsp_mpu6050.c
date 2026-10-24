@@ -9,12 +9,12 @@
 extern I2C_HandleTypeDef hi2c1;
 
 /* I2C1 pin mapping select.
- * 0 = PB6/PB7 (P9 row 2, the documented free bus)
- * 1 = PB8/PB9 (P9 row 1) -- current bench wiring sits one row high; the
- *     on-board chips do not ACK on this net (scan shows only the MPU),
- *     so sharing it is harmless here. Flip to 0 after moving the wires.
+ * 0 = PB6/PB7 (P9 row 2, the documented free bus)  <-- bench wiring
+ * 1 = PB8/PB9 (P9 row 1, on-board chip bus)
+ * Day-2 saga: a flaky dupont made the module appear on both nets at
+ * different times; honest post-fix scans plus this macro settle it.
  */
-#define BSP_I2C1_USE_PB89  1
+#define BSP_I2C1_USE_PB89  0
 
 #define BSP_I2C1_PINS()  (BSP_I2C1_USE_PB89 ? (GPIO_PIN_8 | GPIO_PIN_9) \
                                             : (GPIO_PIN_6 | GPIO_PIN_7))
@@ -88,7 +88,9 @@ static void i2c1_scan_print(const char *tag)
 
 void BSP_I2C1_ScanReport(void)
 {
+    i2c1_pins(GPIO_PIN_6 | GPIO_PIN_7);   /* actually switch, not just label */
     i2c1_scan_print("@PB6/7");
+    i2c1_pins(BSP_I2C1_PINS());
 }
 
 /* Second mapping probe: I2C1 can also live on PB8/PB9 (the on-board
@@ -171,19 +173,53 @@ void BSP_I2C1_BridgeTest(void)
 int BSP_MPU6050_Init(void)
 {
     uint8_t id = 0;
+    int found = 0;
+    int lasterr = -1;
+
+    /* Long dupont wires make 400 kHz edges marginal: ACK probes pass but
+     * register transactions fail (Day-2 fingerprint). Standard mode has
+     * plenty of bandwidth for a 10 Hz sensor task. */
+    hi2c1.Init.ClockSpeed = 100000;
+    HAL_I2C_Init(&hi2c1);
 
     i2c1_pins(BSP_I2C1_PINS());   /* enforce the selected mapping */
 
-    /* address auto-detect: 0x68 first, AD0-bridged clones answer 0x69 */
-    s_mpu_addr = MPU6050_ADDR_DEFAULT;
-    if (mpu_read_regs(MPU6050_REG_WHOAMI, &id, 1) != 0 || id != 0x68)
+    /* Address auto-detect with full forensic visibility:
+     *   -1xx  = WHO_AM_I read failed, xx = HAL status (1 err, 2 busy, 3 to)
+     *   -2xx  = read OK but wrong id, xx = the id byte actually received
+     *   -3/-4 = reset / config write failure (see below)
+     */
+    for (int try = 0; try < 2 && !found; ++try)
     {
-        s_mpu_addr = MPU6050_ADDR_ALT;
-        if (mpu_read_regs(MPU6050_REG_WHOAMI, &id, 1) != 0 || id != 0x68)
+        s_mpu_addr = (try == 0) ? MPU6050_ADDR_DEFAULT : MPU6050_ADDR_ALT;
+
+        HAL_StatusTypeDef st = HAL_I2C_Mem_Read(&hi2c1, s_mpu_addr,
+                                                MPU6050_REG_WHOAMI,
+                                                I2C_MEMADD_SIZE_8BIT,
+                                                &id, 1, MPU6050_TIMEOUT_MS);
+        if (st != HAL_OK)
         {
-            s_mpu_addr = MPU6050_ADDR_DEFAULT;
-            return -1;
+            /* -1xy: x = HAL status, y = I2C error code
+             * y: 1 BERR (misplaced start/stop, line contention)
+             *    2 ARLO (arbitration lost: another driver on the bus)
+             *    4 AF   (acknowledge failure)
+             *    8 OVR  16 TIMEOUT                              */
+            lasterr = -(100 + (int)st * 10 + (int)HAL_I2C_GetError(&hi2c1));
         }
+        else if (id != 0x68)
+        {
+            lasterr = -200 - (int)id;
+        }
+        else
+        {
+            found = 1;
+        }
+    }
+
+    if (!found)
+    {
+        s_mpu_addr = MPU6050_ADDR_DEFAULT;
+        return lasterr;
     }
 
     if (mpu_write_reg(MPU6050_REG_PWR1, 0x80) != 0)   /* device reset */

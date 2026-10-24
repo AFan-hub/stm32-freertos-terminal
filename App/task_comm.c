@@ -55,7 +55,7 @@ void CommTask(void *argument)
     ProcessedData_t latest = { { 0 }, 0.0f, 0.0f, 0 };
     ProcessedData_t sample;
 
-    comm_print("stm32_pi terminal boot\r\n");
+    comm_print("stm32_pi terminal boot [fw D2e]\r\n");
     comm_tick_probe();
 
     for (;;)
