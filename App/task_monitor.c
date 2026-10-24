@@ -9,16 +9,29 @@ void MonitorTask(void *argument)
 {
     (void)argument;
     uint32_t last[TASK_COUNT] = { 0 };
+    uint8_t miss[TASK_COUNT] = { 0 };
     char line[48];
+
+    /* Boot grace: the CH340 one-key-download circuit resets the MCU 2-3
+     * times on first power-up (board manual), and tasks need a moment to
+     * reach their first heartbeat. Snapshot after 2 s instead of at zero.
+     */
+    App_TaskHeartbeat(TASK_MONITOR);
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    for (int i = 0; i < TASK_COUNT; ++i)
+    {
+        last[i] = gHeartbeat[i];
+    }
 
     for (;;)
     {
         App_TaskHeartbeat(TASK_MONITOR);
         vTaskDelay(pdMS_TO_TICKS(1000));
 
-        /* Software watchdog: a task that fails to bump its heartbeat
-         * within one monitor period is considered stalled. Day 5 adds
-         * uxTaskGetStackHighWaterMark() reporting and recovery policy.
+        /* Software watchdog: a task must bump its heartbeat every period.
+         * Two consecutive misses before declaring a stall, so a single
+         * delayed cycle (power dip, long critical section) never latches
+         * a fault.
          */
         for (int i = 0; i < TASK_COUNT; ++i)
         {
@@ -29,10 +42,19 @@ void MonitorTask(void *argument)
 
             if (last[i] == gHeartbeat[i])
             {
-                App_SetFault(SYS_TASK_STALL);
-                snprintf(line, sizeof(line),
-                         "[monitor] task %d stalled\r\n", i);
-                BSP_UART1_Print(line);
+                if (++miss[i] >= 2)
+                {
+                    App_SetFault(SYS_TASK_STALL);
+                    snprintf(line, sizeof(line),
+                             "[monitor] task %d stalled\r\n", i);
+                    BSP_UART1_Print(line);
+                    BSP_UART2_Print(line);
+                    miss[i] = 0;
+                }
+            }
+            else
+            {
+                miss[i] = 0;
             }
 
             last[i] = gHeartbeat[i];

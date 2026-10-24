@@ -4,6 +4,7 @@
 
 #include "app_main.h"
 #include "bsp_delay.h"
+#include "bsp_mpu6050.h"
 #include "bsp_uart.h"
 #include "main.h"
 
@@ -50,7 +51,9 @@ static void comm_tick_probe(void)
 void CommTask(void *argument)
 {
     (void)argument;
-    char line[64];
+    char line[96];
+    ProcessedData_t latest = { { 0 }, 0.0f, 0.0f, 0 };
+    ProcessedData_t sample;
 
     comm_print("stm32_pi terminal boot\r\n");
     comm_tick_probe();
@@ -59,12 +62,21 @@ void CommTask(void *argument)
     {
         App_TaskHeartbeat(TASK_COMM);
 
+        while (xQueueReceive(gCommQueue, &sample, 0) == pdPASS)
+        {
+            latest = sample;
+        }
+
         /* Day 3: this blocking print is replaced by the Ring Buffer +
          * DMA async path; Day 6 adds the CLI line parser on USART1 RX.
          */
         int n = snprintf(line, sizeof(line),
-                         "[comm] up=%lu s fault=0x%02lX\r\n",
+                         "[comm] up=%lu s t=%.1f l=%.1f alm=%lu png=%d fault=0x%02lX\r\n",
                          (unsigned long)(xTaskGetTickCount() / 1000),
+                         (double)latest.filtered_1,
+                         (double)latest.filtered_2,
+                         (unsigned long)(latest.alarm_flags & 1u),
+                         BSP_MPU6050_Ping(),
                          (unsigned long)gFaultFlags);
 
         if (n > 0)
