@@ -76,6 +76,27 @@
 
 串口根因确认：**用 CH340G 模块监听时一直没把模块 RXD/TXD 接到 PA9/PA10（USART1）**，固件串口路径从一开始就是好的。教训：物理链路先于软件怀疑。USART2 镜像通道保留作调试通道（Day 15 接树莓派时收回，USART2 回归纯数据链路）。调试器中启动窗口 HAL_Delay  dwell 归档不复追（DWT 延时已使其不影响启动）。原理图查 CH340 任务取消。
 
+## Day 2（2026-10-25）验收通过
+
+今天完成：
+
+1. MPU6050 I2C 驱动（WHO_AMI/复位/量程/14 字节突发读）+ 光敏 ADC 采集入 SensorQueue（满队丢样并置 SYS_QUEUE_OVERFLOW）
+2. ProcessTask 一阶 IIR 滤波 + ConfigMutex 保护下读阈值 + alarm_flags；Display/Comm 消费镜像队列
+3. 屏显 T/L/ALARM；串口行含 t/l/alm/png
+4. 验收现象：T 从室温爬升过 30.0 触发 ALARM，L 遮光变化，F:0，png=1
+
+今天发现的问题（I2C 接线悬案全过程，面试素材）：
+
+1. 症状序列：scan none → scan 68 但 init 失败 → 双映射 scan 都见 68 → 最终 `1A 50 68` 双映射全同
+2. 根因链：MPU 的 SCL/SDA 插在 P9 **第一行**（PB9/PB8，差一行 2.54mm）；后续重插时杜邦母头跨搭使 **PB6/7 与 PB8/9 两组脚物理桥接**（板载 EEPROM 0x50 因此两条映射都可见）
+3. 处置：固件宏 `BSP_I2C1_USE_PB89=1` 把 I2C1 映射到 PB8/PB9 匹配现接线（该净线上实测仅 MPU+被桥接过来的板载芯片，地址互不冲突）；桥接点待 [bridge] 矩阵存档
+4. 方法论沉淀：**地址扫描 + 双映射扫描 + 桥接矩阵 + 每秒 ping** 四层诊断，把"玄学接触问题"变成可读输出；复位后 100ms 等待是 MPU6050 datasheet 明写的坑
+
+明天第一件事：
+
+1. Day 3：UART DMA + Ring Buffer 异步日志（CommTask 去掉阻塞发送），验收=高频日志下 SensorTask 周期不抖
+2. 讨要/存档 [bridge] 五行矩阵，定位 PB6/7-PB8/9 桥接点
+
 ## Day 0 续 2（2026-10-23 夜）
 
 今天完成：
