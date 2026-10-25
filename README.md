@@ -19,10 +19,14 @@ heartbeats, software watchdog, stack watermarks, Flash-persisted config
 ## Progress
 
 - [x] Day 0: repo, types, ring buffer, CRC16, protocol encoder, CubeMX sheet
-- [ ] Day 1: CubeMX project + LED + two tasks (acceptance: stable 5 min)
-- [ ] Day 2: SensorTask + SensorQueue + ProcessTask
-- [ ] Day 3: Ring Buffer + UART DMA + TxCplt notification
-- [ ] Day 4: DisplayTask + MonitorTask
-- [ ] Day 5: heartbeat / stack watermark / fault flags / overflow hook
-- [ ] Day 6: Flash config + CRC + ConfigMutex
-- [ ] Day 7: CLI + README + resource usage record
+- [x] Day 1: CubeMX project + five tasks + TFT(FSMC)/UART/DWT-delay BSP
+- [x] Day 2: MPU6050 I2C + light ADC acquisition, filtering, threshold,
+      alarm display (MPU module pending replacement: bus forensics closed,
+      module declared faulty by SSD1306 cross-test)
+- [x] Day 3: UART DMA + Ring Buffer async TX (TxCplt -> task notification ->
+      CommTask pump), interrupt-driven RX ring
+- [x] Day 4: MonitorTask stall detection + stack high-water reports
+- [x] Day 5: Flash config persistence (magic/version/CRC16, sector 8)
+- [x] Day 6: serial CLI (help/status/task/config/set/save/reboot) +
+      FreeRTOS run-time stats on TIM5
+- [ ] Day 7: README polish + resource usage record + final cleanup

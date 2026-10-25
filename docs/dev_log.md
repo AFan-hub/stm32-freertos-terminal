@@ -105,6 +105,30 @@
 
 待办：补焊或更换 MPU 模块；到货即插即验收 Day 2。等待期间推进 Day 3（不依赖 MPU）。
 
+## Day 3-6 一次性完成（2026-10-25）
+
+按用户要求不再按天推进，一次补齐项目 1 剩余全部模块：
+
+1. **UART DMA + Ring Buffer 异步发送**（bsp_uart 重写）：业务写环缓冲 → DMA 发当前连续段 → TxCplt ISR 消费+`vTaskNotifyGiveFromISR` → CommTask 泵下一段；USART1/USART2 双通道；USART1 RX 中断+环缓冲供 CLI
+2. **Flash 配置持久化**（bsp_flash）：sector 8，magic/version/CRC16 + 回读校验；启动加载失败回退默认；仅 `save` 命令写
+3. **CLI**（Components/cli）：help/status/task/config/set period/set threshold/save/reboot；`task` 附 FreeRTOS run-time stats（TIM5 1MHz 自由计数）
+4. **CommTask 重写**：泵 DMA + 排空 comm 队列（PC 日志行 + USART2 二进制协议帧 10Hz）+ CLI 行装配
+5. **MonitorTask**：每 10s 打印各任务栈高水位
+6. **事件组**：gSystemEventGroup 与 fault 位图同步置位
+
+已知遗留：MPU6050 模块故障未换，`fault` 常驻 bit1（SYS_SENSOR_TIMEOUT）属预期，换模块后自愈。
+
+### 资源档案（Keil Build Output, F407ZGT6 = 1MB Flash / 192KB RAM）
+
+```
+Program Size: Code=54224 RO-data=13476 RW-data=212 ZI-data=42068
+Flash = Code+RO+RW = 67912 B  ≈ 66.3 KB = 6.5%
+RAM   = RW+ZI      = 42280 B  ≈ 41.3 KB = 21.5%
+```
+
+ZI 大头：FreeRTOS 堆 32KB + TX/RX 环缓冲 1.75KB + HAL/队列控制块。
+运行时栈余量 59%~86%（task 命令实测），CPU 占用 IDLE 95%。
+
 ## Day 0 续 2（2026-10-23 夜）
 
 今天完成：
