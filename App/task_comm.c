@@ -34,7 +34,6 @@ static void comm_tick_probe(void)
     if (n > 0)
     {
         BSP_UART1_SendBuffer((const uint8_t *)line, (uint16_t)n);
-        BSP_UART2_SendBuffer((const uint8_t *)line, (uint16_t)n);
     }
 }
 
@@ -49,7 +48,7 @@ void CommTask(void *argument)
 
     comm_tick_probe();                      /* raw path, pre-async */
     BSP_UART_AsyncInit(xTaskGetCurrentTaskHandle());
-    BSP_UART1_AsyncPrint("stm32_pi terminal boot [fw D3b]\r\n> ");
+    BSP_UART1_AsyncPrint("stm32_pi terminal boot [fw D3c]\r\n> ");
 
     for (;;)
     {
