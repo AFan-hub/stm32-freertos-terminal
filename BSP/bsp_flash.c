@@ -22,7 +22,7 @@ int BSP_Flash_SaveConfig(const SystemConfig_t *cfg)
     uint32_t addr = CONFIG_FLASH_ADDR;
 
     image.magic = 0xA55AA55Au;
-    image.version = 1;
+    image.version = CONFIG_VERSION;
     image.crc = config_crc(&image);
 
     HAL_FLASH_Unlock();
@@ -63,7 +63,7 @@ int BSP_Flash_LoadConfig(SystemConfig_t *cfg)
 
     memcpy(&image, (const void *)CONFIG_FLASH_ADDR, sizeof(image));
 
-    if (image.magic != 0xA55AA55Au || image.version != 1 ||
+    if (image.magic != 0xA55AA55Au || image.version != CONFIG_VERSION ||
         image.crc != config_crc(&image))
     {
         return -1;

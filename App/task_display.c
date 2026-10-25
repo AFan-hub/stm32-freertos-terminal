@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "app_main.h"
+#include "bsp_oled.h"
 #include "lcd.h"
 
 /* Backend: Alientek 4.3" TFT over FSMC (portrait, see app_main.c init).
@@ -48,10 +49,10 @@ void DisplayTask(void *argument)
         lcd_show_string(120, 130, 60, 24, 24, "P:", WHITE);
         lcd_show_num(160, 130, gHeartbeat[TASK_PROCESS] % 1000, 3, 24, GREEN);
 
-        snprintf(buf, sizeof(buf), "T:%.1fC", (double)latest.filtered_1);
+        snprintf(buf, sizeof(buf), "L:%.1f%%", (double)latest.filtered_1);
         lcd_show_string(10, 170, 240, 24, 24, buf, YELLOW);
 
-        snprintf(buf, sizeof(buf), "L:%.1f%%", (double)latest.filtered_2);
+        snprintf(buf, sizeof(buf), "T:%.1fC", (double)latest.filtered_2);
         lcd_show_string(10, 210, 240, 24, 24, buf, YELLOW);
 
         if (latest.alarm_flags & 0x01)
@@ -62,6 +63,14 @@ void DisplayTask(void *argument)
         {
             lcd_show_string(10, 250, 240, 24, 24, "OK   ", GREEN);
         }
+
+        /* SSD1306 secondary display over I2C1 */
+        snprintf(buf, sizeof(buf), "L:%.1f%%    ", (double)latest.filtered_1);
+        BSP_OLED_ShowString(0, 0, buf);
+        snprintf(buf, sizeof(buf), "T:%.1fC    ", (double)latest.filtered_2);
+        BSP_OLED_ShowString(1, 0, buf);
+        BSP_OLED_ShowString(2, 0,
+                            (latest.alarm_flags & 0x01) ? "ALARM   " : "OK      ");
 
         vTaskDelay(pdMS_TO_TICKS(500));
     }

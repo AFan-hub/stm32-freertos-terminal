@@ -49,7 +49,7 @@ void CommTask(void *argument)
 
     comm_tick_probe();                      /* raw path, pre-async */
     BSP_UART_AsyncInit(xTaskGetCurrentTaskHandle());
-    BSP_UART1_AsyncPrint("stm32_pi terminal boot\r\n> ");
+    BSP_UART1_AsyncPrint("stm32_pi terminal boot [fw D3b]\r\n> ");
 
     for (;;)
     {
@@ -62,7 +62,7 @@ void CommTask(void *argument)
         while (xQueueReceive(gCommQueue, &sample, 0) == pdPASS)
         {
             int n = snprintf(line, sizeof(line),
-                             "[comm] up=%lu s t=%.1f l=%.1f alm=%lu fault=0x%02lX\r\n> ",
+                             "[comm] up=%lu s l=%.1f t=%.1f alm=%lu fault=0x%02lX\r\n> ",
                              (unsigned long)(xTaskGetTickCount() / 1000),
                              (double)sample.filtered_1,
                              (double)sample.filtered_2,

@@ -20,9 +20,10 @@ heartbeats, software watchdog, stack watermarks, Flash-persisted config
 
 - [x] Day 0: repo, types, ring buffer, CRC16, protocol encoder, CubeMX sheet
 - [x] Day 1: CubeMX project + five tasks + TFT(FSMC)/UART/DWT-delay BSP
-- [x] Day 2: MPU6050 I2C + light ADC acquisition, filtering, threshold,
-      alarm display (MPU module pending replacement: bus forensics closed,
-      module declared faulty by SSD1306 cross-test)
+- [x] Day 2: acquisition pipeline live: photoresistor (ADC1_IN1) as alarm
+      channel + on-chip temperature (ADC1_IN16, VREFINT self-calibrated);
+      SSD1306 on I2C1 as secondary display. MPU6050 module declared faulty
+      by cross-test, driver kept for a future third channel
 - [x] Day 3: UART DMA + Ring Buffer async TX (TxCplt -> task notification ->
       CommTask pump), interrupt-driven RX ring
 - [x] Day 4: MonitorTask stall detection + stack high-water reports

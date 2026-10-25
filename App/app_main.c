@@ -4,6 +4,7 @@
 
 #include "bsp_delay.h"
 #include "bsp_flash.h"
+#include "bsp_oled.h"
 #include "bsp_uart.h"
 #include "lcd.h"
 #include "task_comm.h"
@@ -25,9 +26,9 @@ EventGroupHandle_t gSystemEventGroup;
 static const SystemConfig_t sDefaultConfig =
 {
     .magic            = 0xA55AA55A,
-    .version          = 1,
+    .version          = 2,      /* v2: sensor_1 = light, threshold in % */
     .sample_period_ms = 100,
-    .alarm_threshold  = 30.0f,
+    .alarm_threshold  = 70.0f,
     .uart_baudrate    = 115200,
     .crc              = 0
 };
@@ -110,9 +111,16 @@ void App_Main_Init(void)
     configASSERT(gCommQueue != NULL);
     configASSERT(gConfigMutex != NULL);
 
-    /* 4.3" TFT over FSMC (Alientek driver). Safe before the scheduler:
-     * its delays are DWT-based (bsp_delay), not HAL tick based. */
+    /* SSD1306 secondary display on I2C1 (PB6/PB7) - the live I2C peripheral
+     * after the MPU6050 module was retired. 4.3" TFT over FSMC stays primary.
+     * Both inits run before the scheduler: DWT/HAL delays only, no OS APIs. */
     bsp_delay_init();
+
+    if (BSP_OLED_Init() != 0)
+    {
+        BSP_UART1_Print("[app] OLED init failed (check I2C1 PB6/PB7)\r\n");
+    }
+
     lcd_init();
     lcd_display_dir(0);   /* panel is mounted portrait on the Explorer */
     LCD_BL(1);

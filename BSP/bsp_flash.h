@@ -11,6 +11,7 @@
  */
 
 #define CONFIG_FLASH_ADDR 0x08080000u
+#define CONFIG_VERSION    2u   /* v2: sensor_1 = light %, threshold in % */
 
 int BSP_Flash_SaveConfig(const SystemConfig_t *cfg);  /* 0 ok */
 int BSP_Flash_LoadConfig(SystemConfig_t *cfg);        /* 0 valid, -1 invalid */
