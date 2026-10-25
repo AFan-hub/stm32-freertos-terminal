@@ -38,6 +38,7 @@ static void i2c1_pins(uint32_t pins)
 #define MPU6050_ADDR_ALT     (0x69u << 1)
 
 static uint8_t s_mpu_addr = MPU6050_ADDR_DEFAULT;
+static int     s_map = 0;   /* 0 = PB6/7, 1 = PB8/9 (whatever init found) */
 #define MPU6050_REG_SMPLRT  0x19
 #define MPU6050_REG_CONFIG  0x1A
 #define MPU6050_REG_GYROCFG 0x1B
@@ -103,6 +104,92 @@ void BSP_I2C1_ScanReportAlt(void)
     i2c1_pins(GPIO_PIN_8 | GPIO_PIN_9);
     i2c1_scan_print("@PB8/9");
     i2c1_pins(BSP_I2C1_PINS());   /* restore the active mapping */
+}
+
+/* Raw bit-bang probe of the WHO_AM_I transaction with per-phase ACK
+ * visibility (Day-2 forensics). Printed ack bits: 0 = ACK, 1 = NAK.
+ *   aw = address+write ack, rg = register byte ack,
+ *   ar = address+read ack (after repeated start), data = byte read.
+ * Runs at ~50 kHz software timing on PB6/PB7, independent of the HAL.
+ */
+void BSP_I2C_RawProbe(void)
+{
+    const uint32_t scl = GPIO_PIN_6;
+    const uint32_t sda = GPIO_PIN_7;
+    GPIO_InitTypeDef g = { 0 };
+    char line[64];
+    int n;
+    uint8_t data = 0;
+    int aw, rg, ar;
+
+#define SCL_H() (GPIOB->BSRR = scl)
+#define SCL_L() (GPIOB->BSRR = (scl << 16))
+#define SDA_H() (GPIOB->BSRR = sda)
+#define SDA_L() (GPIOB->BSRR = (sda << 16))
+#define SDA_R() (((GPIOB->IDR & sda) != 0u) ? 1 : 0)
+#define T()     bsp_delay_us(10)
+
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    g.Mode  = GPIO_MODE_OUTPUT_OD;
+    g.Pull  = GPIO_PULLUP;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    g.Pin   = scl | sda;
+    HAL_GPIO_Init(GPIOB, &g);
+
+    SDA_H(); SCL_H(); T();          /* idle */
+    SDA_L(); T(); SCL_L(); T();     /* start */
+
+    /* address + write */
+    for (int i = 7; i >= 0; --i)
+    {
+        if ((0xD0 >> i) & 1) { SDA_H(); } else { SDA_L(); }
+        T(); SCL_H(); T(); SCL_L(); T();
+    }
+    SDA_H(); T(); SCL_H(); T(); aw = SDA_R(); SCL_L(); T();
+
+    /* register byte 0x75 */
+    for (int i = 7; i >= 0; --i)
+    {
+        if ((0x75 >> i) & 1) { SDA_H(); } else { SDA_L(); }
+        T(); SCL_H(); T(); SCL_L(); T();
+    }
+    SDA_H(); T(); SCL_H(); T(); rg = SDA_R(); SCL_L(); T();
+
+    /* repeated start */
+    SDA_H(); T(); SCL_H(); T();
+    SDA_L(); T(); SCL_L(); T();
+
+    /* address + read */
+    for (int i = 7; i >= 0; --i)
+    {
+        if ((0xD1 >> i) & 1) { SDA_H(); } else { SDA_L(); }
+        T(); SCL_H(); T(); SCL_L(); T();
+    }
+    SDA_H(); T(); SCL_H(); T(); ar = SDA_R(); SCL_L(); T();
+
+    /* one data byte, then NAK + stop */
+    for (int i = 7; i >= 0; --i)
+    {
+        SDA_H(); T(); SCL_H(); T();
+        data = (uint8_t)((data << 1) | (uint8_t)SDA_R());
+        SCL_L(); T();
+    }
+    SDA_H(); T(); SCL_H(); T(); SCL_L(); T();   /* NAK */
+    SDA_L(); T(); SCL_H(); T(); SDA_H(); T();   /* stop */
+
+#undef SCL_H
+#undef SCL_L
+#undef SDA_H
+#undef SDA_L
+#undef SDA_R
+#undef T
+
+    n = snprintf(line, sizeof(line),
+                 "[raw] aw:%d rg:%d ar:%d data:%02X\r\n", aw, rg, ar, data);
+    BSP_UART1_SendBuffer((const uint8_t *)line, (uint16_t)n);
+    BSP_UART2_SendBuffer((const uint8_t *)line, (uint16_t)n);
+
+    i2c1_pins(BSP_I2C1_PINS());
 }
 
 int BSP_MPU6050_Ping(void)
@@ -176,43 +263,50 @@ int BSP_MPU6050_Init(void)
     int found = 0;
     int lasterr = -1;
 
-    /* Long dupont wires make 400 kHz edges marginal: ACK probes pass but
-     * register transactions fail (Day-2 fingerprint). Standard mode has
-     * plenty of bandwidth for a 10 Hz sensor task. */
-    hi2c1.Init.ClockSpeed = 100000;
-    HAL_I2C_Init(&hi2c1);
-
-    i2c1_pins(BSP_I2C1_PINS());   /* enforce the selected mapping */
-
-    /* Address auto-detect with full forensic visibility:
+    /* Self-configuring bring-up: the bench wiring's electrical row proved
+     * unguessable across sessions, so sweep {clock} x {pin map} x {address}
+     * and keep whichever combination answers WHO_AM_I correctly.
      *   -1xx  = WHO_AM_I read failed, xx = HAL status (1 err, 2 busy, 3 to)
      *   -2xx  = read OK but wrong id, xx = the id byte actually received
      *   -3/-4 = reset / config write failure (see below)
      */
-    for (int try = 0; try < 2 && !found; ++try)
-    {
-        s_mpu_addr = (try == 0) ? MPU6050_ADDR_DEFAULT : MPU6050_ADDR_ALT;
+    static const uint32_t clocks[2] = { 100000, 400000 };
 
-        HAL_StatusTypeDef st = HAL_I2C_Mem_Read(&hi2c1, s_mpu_addr,
-                                                MPU6050_REG_WHOAMI,
-                                                I2C_MEMADD_SIZE_8BIT,
-                                                &id, 1, MPU6050_TIMEOUT_MS);
-        if (st != HAL_OK)
+    for (int c = 0; c < 2 && !found; ++c)
+    {
+        hi2c1.Init.ClockSpeed = clocks[c];
+        HAL_I2C_Init(&hi2c1);
+
+        for (int map = 0; map < 2 && !found; ++map)
         {
-            /* -1xy: x = HAL status, y = I2C error code
-             * y: 1 BERR (misplaced start/stop, line contention)
-             *    2 ARLO (arbitration lost: another driver on the bus)
-             *    4 AF   (acknowledge failure)
-             *    8 OVR  16 TIMEOUT                              */
-            lasterr = -(100 + (int)st * 10 + (int)HAL_I2C_GetError(&hi2c1));
-        }
-        else if (id != 0x68)
-        {
-            lasterr = -200 - (int)id;
-        }
-        else
-        {
-            found = 1;
+            i2c1_pins(map ? (GPIO_PIN_8 | GPIO_PIN_9)
+                          : (GPIO_PIN_6 | GPIO_PIN_7));
+
+            for (int try = 0; try < 2 && !found; ++try)
+            {
+                s_mpu_addr = (try == 0) ? MPU6050_ADDR_DEFAULT
+                                        : MPU6050_ADDR_ALT;
+
+                HAL_StatusTypeDef st = HAL_I2C_Mem_Read(&hi2c1, s_mpu_addr,
+                                                        MPU6050_REG_WHOAMI,
+                                                        I2C_MEMADD_SIZE_8BIT,
+                                                        &id, 1,
+                                                        MPU6050_TIMEOUT_MS);
+                if (st != HAL_OK)
+                {
+                    lasterr = -(100 + (int)st * 10 +
+                                (int)HAL_I2C_GetError(&hi2c1));
+                }
+                else if (id != 0x68)
+                {
+                    lasterr = -200 - (int)id;
+                }
+                else
+                {
+                    s_map = map;
+                    found = 1;
+                }
+            }
         }
     }
 
@@ -243,6 +337,11 @@ int BSP_MPU6050_Init(void)
     }
 
     return 0;
+}
+
+int BSP_MPU6050_MapIsPB89(void)
+{
+    return s_map;
 }
 
 int BSP_MPU6050_Read(float *ax, float *ay, float *az, float *temp_c)

@@ -12,7 +12,13 @@ int BSP_MPU6050_Ping(void);
 /* Bridge/short matrix on PB6-PB9 (see .c for reading the output). */
 void BSP_I2C1_BridgeTest(void);
 
-int BSP_MPU6050_Init(void);   /* 0 = WHO_AM_I matched (0x68 or 0x69 auto) */
+/* Bit-bang WHO_AM_I transaction with per-phase ACK visibility. */
+void BSP_I2C_RawProbe(void);
+
+int BSP_MPU6050_Init(void);   /* self-configuring: sweeps clock x pins x addr */
+
+/* Which pin map init settled on: 0 = PB6/7, 1 = PB8/9. */
+int BSP_MPU6050_MapIsPB89(void);
 
 /* Print every ACKing address on I2C1 (PB6/7) to both UARTs. */
 void BSP_I2C1_ScanReport(void);

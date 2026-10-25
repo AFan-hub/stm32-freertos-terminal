@@ -1,4 +1,6 @@
-MDK-Objects/
-MDK-ARM/Objects/
-MDK-ARM/Listings/
+# Keil compiles in place under MDK-ARM/: track only the project file,
+# ignore every object/listing/binary that the toolchain regenerates.
+MDK-ARM/*
+!MDK-ARM/stm32_pi.uvprojx
 *.uvguix.*
+*.pdf

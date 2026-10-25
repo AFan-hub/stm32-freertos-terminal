@@ -671,6 +671,21 @@
               <FileType>1</FileType>
               <FilePath>../BSP/lcd.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_adc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\bsp_adc.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_mpu6050.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\bsp_mpu6050.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_flash.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../BSP/bsp_flash.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -690,6 +705,11 @@
               <FileName>protocol.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Components/protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>cli.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Components/cli.c</FilePath>
             </File>
           </Files>
         </Group>

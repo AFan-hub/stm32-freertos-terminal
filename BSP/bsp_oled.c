@@ -12,11 +12,32 @@ extern I2C_HandleTypeDef hi2c1;
 #define OLED_CMD_BURST 32
 #define OLED_TIMEOUT   50
 
+static int i2c_tx(const uint8_t *buf, uint16_t len)
+{
+    /* HAL prototypes lack const on the TX buffer; it is never written. */
+    uint8_t *tx = (uint8_t *)(uintptr_t)buf;
+
+    if (HAL_I2C_Master_Transmit(&hi2c1, OLED_ADDR_WR, tx, len,
+                                OLED_TIMEOUT) == HAL_OK)
+    {
+        return 0;
+    }
+
+    /* One bus recovery attempt: a single stretched/glitched transaction
+     * must not freeze the display forever (HAL handle stuck in error). */
+    if (HAL_I2C_DeInit(&hi2c1) == HAL_OK && HAL_I2C_Init(&hi2c1) == HAL_OK)
+    {
+        return (HAL_I2C_Master_Transmit(&hi2c1, OLED_ADDR_WR, tx, len,
+                                        OLED_TIMEOUT) == HAL_OK) ? 0 : -1;
+    }
+
+    return -1;
+}
+
 static int oled_cmd(uint8_t cmd)
 {
     uint8_t buf[2] = { 0x00, cmd };   /* Co=0, D/C#=0 -> command */
-    return (HAL_I2C_Master_Transmit(&hi2c1, OLED_ADDR_WR, buf, 2,
-                                    OLED_TIMEOUT) == HAL_OK) ? 0 : -1;
+    return i2c_tx(buf, 2);
 }
 
 static int oled_data(const uint8_t *data, uint16_t len)
@@ -31,9 +52,7 @@ static int oled_data(const uint8_t *data, uint16_t len)
         buf[0] = 0x40;                /* Co=0, D/C#=1 -> data */
         memcpy(&buf[1], &data[off], chunk);
 
-        if (HAL_I2C_Master_Transmit(&hi2c1, OLED_ADDR_WR, buf,
-                                    (uint16_t)(chunk + 1),
-                                    OLED_TIMEOUT) != HAL_OK)
+        if (i2c_tx(buf, (uint16_t)(chunk + 1)) != 0)
         {
             return -1;
         }
