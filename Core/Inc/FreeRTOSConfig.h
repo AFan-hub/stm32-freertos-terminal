@@ -174,6 +174,14 @@ standard names. */
 /* Method 2: check stack watermark on context switch AND on task delete. */
 #define configCHECK_FOR_STACK_OVERFLOW       2
 
+/* Run-time stats on a free-running 1 MHz TIM5 counter (app_main.c). */
+void vRunTimeTimerInit(void);
+uint32_t ulRunTimeTimerValue(void);
+#define configGENERATE_RUN_TIME_STATS        1
+#define configUSE_STATS_FORMATTING_FUNCTIONS 1
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() vRunTimeTimerInit()
+#define portGET_RUN_TIME_COUNTER_VALUE()         ulRunTimeTimerValue()
+
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

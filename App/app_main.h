@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "FreeRTOS.h"
+#include "event_groups.h"
 #include "queue.h"
 #include "semphr.h"
 #include "task.h"
@@ -39,9 +40,15 @@ extern SystemConfig_t    gSystemConfig;
 
 extern volatile uint32_t gHeartbeat[TASK_COUNT];
 extern volatile uint32_t gFaultFlags;   /* one bit per SystemFault_t */
+extern EventGroupHandle_t gSystemEventGroup;  /* same bits, waitable */
 
 void App_Main_Init(void);
 void App_TaskHeartbeat(TaskId_t id);
 void App_SetFault(SystemFault_t fault);
+TaskHandle_t App_TaskHandle(TaskId_t id);
+
+/* run-time stats time base (TIM5, 1 MHz free running) */
+void vRunTimeTimerInit(void);
+uint32_t ulRunTimeTimerValue(void);
 
 #endif

@@ -10,6 +10,7 @@ void MonitorTask(void *argument)
     (void)argument;
     uint32_t last[TASK_COUNT] = { 0 };
     uint8_t miss[TASK_COUNT] = { 0 };
+    uint32_t seconds = 0;
     char line[48];
 
     /* Boot grace: the CH340 one-key-download circuit resets the MCU 2-3
@@ -27,6 +28,25 @@ void MonitorTask(void *argument)
     {
         App_TaskHeartbeat(TASK_MONITOR);
         vTaskDelay(pdMS_TO_TICKS(1000));
+
+        /* every 10 s: stack high-water marks (manual §14) */
+        if ((++seconds % 10) == 0)
+        {
+            for (int i = 0; i < TASK_COUNT; ++i)
+            {
+                TaskHandle_t h = App_TaskHandle((TaskId_t)i);
+
+                if (h == NULL)
+                {
+                    continue;
+                }
+
+                snprintf(line, sizeof(line), "[mon] %-8s hw=%lu words\r\n",
+                         pcTaskGetName(h),
+                         (unsigned long)uxTaskGetStackHighWaterMark(h));
+                BSP_UART1_AsyncPrint(line);
+            }
+        }
 
         /* Software watchdog: a task must bump its heartbeat every period.
          * Two consecutive misses before declaring a stall, so a single

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "bsp_delay.h"
+#include "bsp_flash.h"
 #include "bsp_uart.h"
 #include "lcd.h"
 #include "task_comm.h"
@@ -19,6 +20,7 @@ SystemConfig_t    gSystemConfig;
 
 volatile uint32_t gHeartbeat[TASK_COUNT];
 volatile uint32_t gFaultFlags;
+EventGroupHandle_t gSystemEventGroup;
 
 static const SystemConfig_t sDefaultConfig =
 {
@@ -30,12 +32,12 @@ static const SystemConfig_t sDefaultConfig =
     .crc              = 0
 };
 
-/* words; CommTask needs headroom for snprintf */
+/* words; CommTask needs headroom for snprintf + run-time stats buffer */
 #define STACK_SENSOR  256
 #define STACK_PROCESS 384
-#define STACK_COMM    512
+#define STACK_COMM    1024
 #define STACK_DISPLAY 384
-#define STACK_MONITOR 384
+#define STACK_MONITOR 512
 
 /* priorities: high tasks stay short (see docs/cubemx_setup.md) */
 #define PRIO_SENSOR   4
@@ -54,20 +56,55 @@ void App_TaskHeartbeat(TaskId_t id)
 void App_SetFault(SystemFault_t fault)
 {
     gFaultFlags |= (1u << (uint32_t)fault);
+
+    if (gSystemEventGroup != NULL)
+    {
+        xEventGroupSetBits(gSystemEventGroup, 1u << (uint32_t)fault);
+    }
+}
+
+TaskHandle_t App_TaskHandle(TaskId_t id)
+{
+    return sTaskHandles[id];
+}
+
+void vRunTimeTimerInit(void)
+{
+    TIM_HandleTypeDef h = { 0 };
+
+    __HAL_RCC_TIM5_CLK_ENABLE();
+    h.Instance   = TIM5;                 /* 32-bit, APB1 = 84 MHz */
+    h.Init.Prescaler = 84 - 1;           /* 1 MHz count */
+    h.Init.CounterMode = TIM_COUNTERMODE_UP;
+    h.Init.Period = 0xFFFFFFFFu;
+    h.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    HAL_TIM_Base_Init(&h);
+    HAL_TIM_Base_Start(&h);
+}
+
+uint32_t ulRunTimeTimerValue(void)
+{
+    return TIM5->CNT;
 }
 
 void App_Main_Init(void)
 {
-    /* Day 6 replaces this with Flash load + magic/version/CRC check. */
-    gSystemConfig = sDefaultConfig;
+    /* Day 6: load persisted config, fall back to defaults on any
+     * magic/version/CRC mismatch. */
+    if (BSP_Flash_LoadConfig(&gSystemConfig) != 0)
+    {
+        gSystemConfig = sDefaultConfig;
+    }
     gFaultFlags = 0;
     memset((void *)gHeartbeat, 0, sizeof(gHeartbeat));
 
+    gSystemEventGroup = xEventGroupCreate();
     gSensorQueue = xQueueCreate(16, sizeof(SensorData_t));
     gDisplayQueue = xQueueCreate(8, sizeof(ProcessedData_t));
     gCommQueue = xQueueCreate(8, sizeof(ProcessedData_t));
     gConfigMutex = xSemaphoreCreateMutex();
 
+    configASSERT(gSystemEventGroup != NULL);
     configASSERT(gSensorQueue != NULL);
     configASSERT(gDisplayQueue != NULL);
     configASSERT(gCommQueue != NULL);
