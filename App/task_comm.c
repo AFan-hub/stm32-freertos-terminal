@@ -6,27 +6,16 @@
 #include "bsp_delay.h"
 #include "bsp_mpu6050.h"
 #include "bsp_uart.h"
+#include "cli.h"
 #include "main.h"
+#include "protocol.h"
 
-/* Day-1 COM-mixup insurance: mirror every log line to USART2 as well, so a
- * CH340G dongle on PA2/PA3 always shows traffic even if the on-board
- * USB-serial path (USART1) is misidentified or jumpered elsewhere. */
-static void comm_print(const char *str)
-{
-    BSP_UART1_Print(str);
-    BSP_UART2_Print(str);
-}
+/* CommTask responsibilities (manual §10.5 / §17):
+ *  - pump the UART1/UART2 DMA chunks (woken by TxCplt notifications)
+ *  - drain gCommQueue: human log line to PC + binary frame to the Pi
+ *  - assemble CLI lines from the USART1 RX ring and dispatch them
+ */
 
-static void comm_send(const uint8_t *buf, uint16_t len)
-{
-    BSP_UART1_SendBuffer(buf, len);
-    BSP_UART2_SendBuffer(buf, len);
-}
-
-/* Day-1 tick forensics: the HAL timebase (TIM6) was found frozen during
- * lcd_init. This probe measures uwTick progress over a tick-independent
- * 500 ms DWT delay and dumps the TIM6/NVIC state, so the serial log alone
- * tells us whether the HAL tick is alive after the scheduler starts. */
 static void comm_tick_probe(void)
 {
     char line[96];
@@ -44,46 +33,83 @@ static void comm_tick_probe(void)
 
     if (n > 0)
     {
-        comm_send((const uint8_t *)line, (uint16_t)n);
+        BSP_UART1_SendBuffer((const uint8_t *)line, (uint16_t)n);
+        BSP_UART2_SendBuffer((const uint8_t *)line, (uint16_t)n);
     }
 }
 
 void CommTask(void *argument)
 {
     (void)argument;
-    char line[96];
-    ProcessedData_t latest = { { 0 }, 0.0f, 0.0f, 0 };
+    char line[128];
+    char cmdbuf[64];
+    uint16_t cmdlen = 0;
+    uint32_t loops = 0;
     ProcessedData_t sample;
 
-    comm_print("stm32_pi terminal boot [fw D2e]\r\n");
-    comm_tick_probe();
+    comm_tick_probe();                      /* raw path, pre-async */
+    BSP_UART_AsyncInit(xTaskGetCurrentTaskHandle());
+    BSP_UART1_AsyncPrint("stm32_pi terminal boot\r\n> ");
 
     for (;;)
     {
         App_TaskHeartbeat(TASK_COMM);
 
+        /* wake on DMA-complete notification, else every 100 ms */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        BSP_UART_Pump();
+
         while (xQueueReceive(gCommQueue, &sample, 0) == pdPASS)
         {
-            latest = sample;
+            int n = snprintf(line, sizeof(line),
+                             "[comm] up=%lu s t=%.1f l=%.1f alm=%lu fault=0x%02lX\r\n> ",
+                             (unsigned long)(xTaskGetTickCount() / 1000),
+                             (double)sample.filtered_1,
+                             (double)sample.filtered_2,
+                             (unsigned long)(sample.alarm_flags & 1u),
+                             (unsigned long)gFaultFlags);
+
+            if (n > 0)
+            {
+                BSP_UART1_AsyncPrint(line);
+            }
+
+            /* binary protocol frame to the Raspberry Pi on USART2 */
+            SensorPayload_t pl;
+            pl.timestamp_ms = sample.raw.timestamp_ms;
+            pl.sensor_1     = sample.filtered_1;
+            pl.sensor_2     = sample.filtered_2;
+            pl.status       = (uint16_t)(sample.alarm_flags & 0xFFFFu);
+
+            uint8_t frame[32];
+            uint16_t flen = Protocol_EncodeSensor(&pl, frame, sizeof(frame));
+
+            if (flen > 0)
+            {
+                BSP_UART2_AsyncWrite(frame, flen);
+            }
         }
 
-        /* Day 3: this blocking print is replaced by the Ring Buffer +
-         * DMA async path; Day 6 adds the CLI line parser on USART1 RX.
-         */
-        int n = snprintf(line, sizeof(line),
-                         "[comm] up=%lu s t=%.1f l=%.1f alm=%lu png=%d fault=0x%02lX\r\n",
-                         (unsigned long)(xTaskGetTickCount() / 1000),
-                         (double)latest.filtered_1,
-                         (double)latest.filtered_2,
-                         (unsigned long)(latest.alarm_flags & 1u),
-                         BSP_MPU6050_Ping(),
-                         (unsigned long)gFaultFlags);
-
-        if (n > 0)
+        /* CLI line assembly from the RX ring */
+        uint8_t b;
+        while (BSP_UART1_ReadByte(&b) == 0)
         {
-            comm_send((const uint8_t *)line, (uint16_t)n);
+            if (b == '\r' || b == '\n')
+            {
+                if (cmdlen > 0)
+                {
+                    cmdbuf[cmdlen] = '\0';
+                    CLI_ProcessLine(cmdbuf);
+                    cmdlen = 0;
+                    BSP_UART1_AsyncPrint("> ");
+                }
+            }
+            else if (cmdlen < sizeof(cmdbuf) - 1)
+            {
+                cmdbuf[cmdlen++] = (char)b;
+            }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        (void)++loops;
     }
 }
